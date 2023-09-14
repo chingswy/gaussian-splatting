@@ -15,7 +15,8 @@ from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianR
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
+def render(viewpoint_camera, pc : GaussianModel, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None,
+    foreground_logit=None):
     """
     Render the scene. 
     
@@ -30,22 +31,21 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         pass
 
     # Set up rasterization configuration
-    tanfovx = math.tan(viewpoint_camera.FoVx * 0.5)
-    tanfovy = math.tan(viewpoint_camera.FoVy * 0.5)
-
+    tanfovx = math.tan(viewpoint_camera['FoVx'] * 0.5)
+    tanfovy = math.tan(viewpoint_camera['FoVy'] * 0.5)
     raster_settings = GaussianRasterizationSettings(
-        image_height=int(viewpoint_camera.image_height),
-        image_width=int(viewpoint_camera.image_width),
+        image_height=int(viewpoint_camera['image_height']),
+        image_width=int(viewpoint_camera['image_width']),
         tanfovx=tanfovx,
         tanfovy=tanfovy,
         bg=bg_color,
         scale_modifier=scaling_modifier,
-        viewmatrix=viewpoint_camera.world_view_transform,
-        projmatrix=viewpoint_camera.full_proj_transform,
+        viewmatrix=viewpoint_camera['world_view_transform'],
+        projmatrix=viewpoint_camera['full_proj_transform'],
         sh_degree=pc.active_sh_degree,
-        campos=viewpoint_camera.camera_center,
+        campos=viewpoint_camera['camera_center'],
         prefiltered=False,
-        debug=pipe.debug
+        debug=False
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
@@ -59,7 +59,8 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     scales = None
     rotations = None
     cov3D_precomp = None
-    if pipe.compute_cov3D_python:
+    # if pipe.compute_cov3D_python:
+    if False:
         cov3D_precomp = pc.get_covariance(scaling_modifier)
     else:
         scales = pc.get_scaling
@@ -70,9 +71,10 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     shs = None
     colors_precomp = None
     if override_color is None:
-        if pipe.convert_SHs_python:
+        # if pipe.convert_SHs_python or True:
+        if False:
             shs_view = pc.get_features.transpose(1, 2).view(-1, 3, (pc.max_sh_degree+1)**2)
-            dir_pp = (pc.get_xyz - viewpoint_camera.camera_center.repeat(pc.get_features.shape[0], 1))
+            dir_pp = (pc.get_xyz - viewpoint_camera['camera_center'].repeat(pc.get_features.shape[0], 1))
             dir_pp_normalized = dir_pp/dir_pp.norm(dim=1, keepdim=True)
             sh2rgb = eval_sh(pc.active_sh_degree, shs_view, dir_pp_normalized)
             colors_precomp = torch.clamp_min(sh2rgb + 0.5, 0.0)
@@ -80,7 +82,11 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             shs = pc.get_features
     else:
         colors_precomp = override_color
-
+    if True:
+        # colors_precomp = torch.ones_like(colors_precomp)
+        opacity = torch.ones_like(opacity)
+    if foreground_logit is not None:
+        colors_precomp = torch.cat([colors_precomp, foreground_logit], dim=1)
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     rendered_image, radii = rasterizer(
         means3D = means3D,

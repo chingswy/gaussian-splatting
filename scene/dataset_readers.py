@@ -34,6 +34,7 @@ class CameraInfo(NamedTuple):
     image_name: str
     width: int
     height: int
+    mask_path: str = None
 
 class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
